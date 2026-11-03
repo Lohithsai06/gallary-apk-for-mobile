@@ -192,7 +192,7 @@ class _GalleryHomeState extends State<GalleryHome> {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       itemCount: albums.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final album = albums[index];
         return FutureBuilder<List<AssetEntity>>(
@@ -385,7 +385,11 @@ class _MediaViewerState extends State<MediaViewer> {
                 title: const Text('Delete this item?'), content: const Text('This removes the item from your device.'),
                 actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                   FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
-              if (ok == true) { await widget.onDelete(current); if (mounted) Navigator.pop(context); }
+              if (ok == true && context.mounted) {
+                await widget.onDelete(current);
+                if (!context.mounted) return;
+                Navigator.pop(context);
+              }
             }, icon: const Icon(Icons.delete_outline, color: Colors.white)),
           ]),
         )),
