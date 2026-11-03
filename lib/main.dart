@@ -10,7 +10,6 @@ void main() => runApp(const GalleryApp());
 const ink = Color(0xFF252A31);
 const muted = Color(0xFF858B93);
 const accent = Color(0xFF176B63);
-const samsungBlue = Color(0xFF2378D4);
 const canvas = Color(0xFFF7F7F5);
 
 class GalleryApp extends StatefulWidget {
@@ -419,7 +418,7 @@ class _MediaViewerState extends State<MediaViewer> {
               await widget.onDelete(deleted);
               if (!context.mounted) return;
               if (items.length <= 1) { Navigator.pop(context); return; }
-              setState(() { items = [...items]..removeWhere((a) => a.id == deleted.id); currentIndex = currentIndex.clamp(0, items.length - 1); });
+              setState(() { items = [...items]..removeWhere((a) => a.id == deleted.id); currentIndex = currentIndex.clamp(0, items.length - 1).toInt(); });
               pageController.jumpToPage(currentIndex);
             }
           }, icon: const Icon(Icons.delete_outline_rounded, color: Colors.white)),
@@ -473,7 +472,7 @@ class _ViewerMedia extends StatelessWidget {
         child: Center(child: InteractiveViewer(
           minScale: 1, maxScale: 5, panEnabled: true, scaleEnabled: true,
           boundaryMargin: const EdgeInsets.all(40),
-          child: Image.file(file, fit: BoxFit.contain, width: double.infinity, height: double.infinity),
+          child: Image.file(file, fit: BoxFit.contain, width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height),
         )),
       );
     },
