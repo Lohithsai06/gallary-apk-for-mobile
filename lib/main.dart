@@ -88,7 +88,7 @@ class _GalleryHomeState extends State<GalleryHome> {
     if (tab == 3) result = result.where((a) => favorites.contains(a.id));
     if (query.trim().isNotEmpty) {
       final q = query.toLowerCase();
-      result = result.where((a) => a.title.toLowerCase().contains(q));
+      result = result.where((a) => (a.title ?? '').toLowerCase().contains(q));
     }
     return result.toList();
   }
@@ -215,7 +215,7 @@ class _GalleryHomeState extends State<GalleryHome> {
                     Text(album.name, maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 5),
-                    Text('${album.assetCount} items', style: const TextStyle(color: muted, fontSize: 12)),
+                    FutureBuilder<int>(future: album.assetCountAsync, builder: (context, count) => Text('${count.data ?? 0} items', style: const TextStyle(color: muted, fontSize: 12))),
                   ])),
                   const Icon(Icons.chevron_right_rounded, color: muted),
                 ])),
@@ -376,7 +376,7 @@ class _MediaViewerState extends State<MediaViewer> {
           child: Row(children: [
             IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(current.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              Text(current.title ?? 'Untitled', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
               Text(_dateLabel(current.createDateTime), style: const TextStyle(color: Colors.white70, fontSize: 11)),
             ])),
             IconButton(onPressed: () => widget.onFavorite(current), icon: Icon(widget.isFavorite(current) ? Icons.favorite : Icons.favorite_border, color: Colors.white)),
