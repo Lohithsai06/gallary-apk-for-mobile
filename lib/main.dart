@@ -88,16 +88,14 @@ class _GalleryHomeState extends State<GalleryHome> {
     final combined = <String, AssetEntity>{};
     for (final item in [...imageItems, ...videoItems]) { combined[item.id] = item; }
     final items = combined.values.toList()
-      // Gallery home is a true combined timeline: newest media first.
-      // Use modification time as a fallback when capture/create time is missing.
+      // Use ONE consistent timestamp for every media type.
+      // Mixing capture/create time with file-modified time can make copied
+      // photos jump around in the timeline.
       ..sort((a, b) {
-        final aDate = a.createDateTime;
-        final bDate = b.createDateTime;
-        final aModified = a.modifiedDateTime;
-        final bModified = b.modifiedDateTime;
-        final aSort = aDate.millisecondsSinceEpoch > 0 ? aDate : aModified;
-        final bSort = bDate.millisecondsSinceEpoch > 0 ? bDate : bModified;
-        return bSort.compareTo(aSort);
+        final byDate = b.createDateTime.compareTo(a.createDateTime);
+        if (byDate != 0) return byDate;
+        // Stable tie-breaker when two items have the same timestamp.
+        return b.id.compareTo(a.id);
       });
     if (!mounted) return;
     setState(() { albums = [...imagePaths, ...videoPaths]; photos = items; loading = false; });
@@ -111,7 +109,13 @@ class _GalleryHomeState extends State<GalleryHome> {
       final q = query.toLowerCase();
       result = result.where((a) => (a.title ?? '').toLowerCase().contains(q));
     }
-    return result.toList();
+    final sorted = result.toList()
+      ..sort((a, b) {
+        final byDate = b.createDateTime.compareTo(a.createDateTime);
+        if (byDate != 0) return byDate;
+        return b.id.compareTo(a.id);
+      });
+    return sorted;
   }
 
   String get pageTitle => const ['All photos & videos', 'Albums', 'Videos', 'Favorites'][tab];
