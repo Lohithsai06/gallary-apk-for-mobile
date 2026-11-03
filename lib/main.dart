@@ -88,7 +88,17 @@ class _GalleryHomeState extends State<GalleryHome> {
     final combined = <String, AssetEntity>{};
     for (final item in [...imageItems, ...videoItems]) { combined[item.id] = item; }
     final items = combined.values.toList()
-      ..sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+      // Gallery home is a true combined timeline: newest media first.
+      // Use modification time as a fallback when capture/create time is missing.
+      ..sort((a, b) {
+        final aDate = a.createDateTime;
+        final bDate = b.createDateTime;
+        final aModified = a.modifiedDateTime;
+        final bModified = b.modifiedDateTime;
+        final aSort = aDate.millisecondsSinceEpoch > 0 ? aDate : aModified;
+        final bSort = bDate.millisecondsSinceEpoch > 0 ? bDate : bModified;
+        return bSort.compareTo(aSort);
+      });
     if (!mounted) return;
     setState(() { albums = [...imagePaths, ...videoPaths]; photos = items; loading = false; });
   }
@@ -104,7 +114,7 @@ class _GalleryHomeState extends State<GalleryHome> {
     return result.toList();
   }
 
-  String get pageTitle => const ['Pictures', 'Albums', 'Videos', 'Favorites'][tab];
+  String get pageTitle => const ['All photos & videos', 'Albums', 'Videos', 'Favorites'][tab];
 
   @override
   Widget build(BuildContext context) {
@@ -162,7 +172,7 @@ class _GalleryHomeState extends State<GalleryHome> {
         selectedIndex: tab,
         onDestinationSelected: (v) => setState(() { tab = v; searching = false; query = ''; searchController.clear(); }),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.photo_outlined), selectedIcon: Icon(Icons.photo), label: 'Photos'),
+          NavigationDestination(icon: Icon(Icons.grid_view_rounded), selectedIcon: Icon(Icons.grid_view_rounded), label: 'All'),
           NavigationDestination(icon: Icon(Icons.photo_album_outlined), selectedIcon: Icon(Icons.photo_album), label: 'Albums'),
           NavigationDestination(icon: Icon(Icons.play_circle_outline_rounded), selectedIcon: Icon(Icons.play_circle), label: 'Videos'),
           NavigationDestination(icon: Icon(Icons.favorite_border_rounded), selectedIcon: Icon(Icons.favorite), label: 'Favorites'),
