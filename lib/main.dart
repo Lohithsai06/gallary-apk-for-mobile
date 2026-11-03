@@ -3,12 +3,14 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:video_player/video_player.dart';
 
 void main() => runApp(const GalleryApp());
 
 const ink = Color(0xFF252A31);
 const muted = Color(0xFF858B93);
-const accent = Color(0xFF397A78);
+const accent = Color(0xFF176B63);
+const samsungBlue = Color(0xFF2378D4);
 const canvas = Color(0xFFF7F7F5);
 
 class GalleryApp extends StatefulWidget {
@@ -28,6 +30,7 @@ class _GalleryAppState extends State<GalleryApp> {
       useMaterial3: true,
       scaffoldBackgroundColor: canvas,
       colorScheme: ColorScheme.fromSeed(seedColor: accent, brightness: Brightness.light),
+      cardTheme: CardThemeData(color: Colors.white, elevation: 0, margin: EdgeInsets.zero),
       appBarTheme: const AppBarTheme(backgroundColor: canvas, foregroundColor: ink, elevation: 0),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.white,
@@ -75,11 +78,20 @@ class _GalleryHomeState extends State<GalleryHome> {
       if (mounted) setState(() { permissionDenied = true; loading = false; });
       return;
     }
-    final paths = await PhotoManager.getAssetPathList(type: RequestType.common, hasAll: true);
-    final all = paths.where((p) => p.isAll).firstOrNull ?? (paths.isNotEmpty ? paths.first : null);
-    final items = all == null ? <AssetEntity>[] : await all.getAssetListPaged(page: 0, size: 500);
+    // Query images and videos independently. Some Android gallery providers return
+    // incomplete results for RequestType.common, especially on newer Android versions.
+    final imagePaths = await PhotoManager.getAssetPathList(type: RequestType.image, hasAll: true);
+    final videoPaths = await PhotoManager.getAssetPathList(type: RequestType.video, hasAll: true);
+    final imageAll = imagePaths.where((p) => p.isAll).firstOrNull ?? (imagePaths.isNotEmpty ? imagePaths.first : null);
+    final videoAll = videoPaths.where((p) => p.isAll).firstOrNull ?? (videoPaths.isNotEmpty ? videoPaths.first : null);
+    final imageItems = imageAll == null ? <AssetEntity>[] : await imageAll.getAssetListPaged(page: 0, size: 1000);
+    final videoItems = videoAll == null ? <AssetEntity>[] : await videoAll.getAssetListPaged(page: 0, size: 1000);
+    final combined = <String, AssetEntity>{};
+    for (final item in [...imageItems, ...videoItems]) { combined[item.id] = item; }
+    final items = combined.values.toList()
+      ..sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
     if (!mounted) return;
-    setState(() { albums = paths; photos = items; loading = false; });
+    setState(() { albums = [...imagePaths, ...videoPaths]; photos = items; loading = false; });
   }
 
   List<AssetEntity> get visibleAssets {
@@ -100,12 +112,13 @@ class _GalleryHomeState extends State<GalleryHome> {
     final assets = visibleAssets;
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 76,
         titleSpacing: 20,
         title: searching
           ? TextField(controller: searchController, autofocus: true, onChanged: (v) => setState(() => query = v),
               decoration: const InputDecoration(hintText: 'Search your media', border: InputBorder.none))
           : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Gallery', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800, letterSpacing: -.8)),
+              const Text('Gallery', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w800, letterSpacing: -1.0)),
               Text(pageTitle, style: const TextStyle(fontSize: 12, color: muted, fontWeight: FontWeight.w500)),
             ]),
         actions: [
@@ -124,7 +137,7 @@ class _GalleryHomeState extends State<GalleryHome> {
         : RefreshIndicator(color: accent, onRefresh: loadMedia, child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
                 child: Row(children: [
                   Text('${assets.length} items', style: const TextStyle(color: muted, fontSize: 13, fontWeight: FontWeight.w600)),
                   const Spacer(),
@@ -132,10 +145,10 @@ class _GalleryHomeState extends State<GalleryHome> {
                 ]),
               )),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(3, 0, 3, 24),
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 24),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3, crossAxisSpacing: 3, mainAxisSpacing: 3, childAspectRatio: .92),
+                    crossAxisCount: 3, crossAxisSpacing: 3, mainAxisSpacing: 3, childAspectRatio: .94),
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final asset = assets[index];
                     return MediaTile(asset: asset, favorite: favorites.contains(asset.id),
@@ -283,6 +296,7 @@ class MediaTile extends StatelessWidget {
     onTap: onTap, onLongPress: onLongPress,
     child: Stack(fit: StackFit.expand, children: [
       AssetThumbnail(asset: asset, fit: BoxFit.cover),
+      if (asset.type == AssetType.video) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.center, colors: [Colors.black38, Colors.transparent])))),
       if (asset.type == AssetType.video) Positioned(right: 7, bottom: 7, child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
@@ -349,85 +363,164 @@ class MediaViewer extends StatefulWidget {
 }
 
 class _MediaViewerState extends State<MediaViewer> {
-  late AssetEntity current = widget.asset;
+  late final PageController pageController;
+  late List<AssetEntity> items;
+  late int currentIndex;
   bool controls = true;
+
+  AssetEntity get current => items[currentIndex];
+
+  @override
+  void initState() {
+    super.initState();
+    items = widget.assets;
+    currentIndex = items.indexWhere((a) => a.id == widget.asset.id);
+    if (currentIndex < 0) currentIndex = 0;
+    pageController = PageController(initialPage: currentIndex);
+  }
+
+  @override
+  void dispose() {
+    pageController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: Colors.black,
-    body: GestureDetector(
-      onTap: () => setState(() => controls = !controls),
-      onHorizontalDragEnd: (details) {
-        final i = widget.assets.indexOf(current);
-        if (details.primaryVelocity != null && details.primaryVelocity! < 0 && i < widget.assets.length - 1) setState(() => current = widget.assets[i + 1]);
-        if (details.primaryVelocity != null && details.primaryVelocity! > 0 && i > 0) setState(() => current = widget.assets[i - 1]);
-      },
-      child: Stack(children: [
-        Center(child: FutureBuilder<File?>(
-          future: current.file,
-          builder: (context, snapshot) {
-            if (!snapshot.hasData || snapshot.data == null) return const CircularProgressIndicator(color: Colors.white);
-            if (current.type == AssetType.video) return _VideoPreview(file: snapshot.data!);
-            return InteractiveViewer(minScale: .8, maxScale: 5, child: Image.file(snapshot.data!, fit: BoxFit.contain));
-          },
+    body: Stack(children: [
+      PageView.builder(
+        controller: pageController,
+        itemCount: items.length,
+        onPageChanged: (index) => setState(() { currentIndex = index; controls = true; }),
+        itemBuilder: (context, index) {
+          final asset = items[index];
+          return _ViewerMedia(asset: asset, onTap: () => setState(() => controls = !controls));
+        },
+      ),
+      if (controls) Positioned(top: 0, left: 0, right: 0, child: Container(
+        padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 4, left: 8, right: 8, bottom: 16),
+        decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent])),
+        child: Row(children: [
+          IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back_rounded, color: Colors.white)),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(current.title ?? 'Untitled', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            Text('${currentIndex + 1} of ${items.length}  •  ${_dateLabel(current.createDateTime)}', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          ])),
+          IconButton(onPressed: () { widget.onFavorite(current); setState(() {}); },
+            icon: Icon(widget.isFavorite(current) ? Icons.favorite_rounded : Icons.favorite_border_rounded, color: widget.isFavorite(current) ? Colors.pinkAccent : Colors.white)),
+          IconButton(onPressed: () async {
+            final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('Delete this item?'), content: const Text('This removes the item from your device.'),
+              actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
+            if (ok == true && context.mounted) {
+              final deleted = current;
+              await widget.onDelete(deleted);
+              if (!context.mounted) return;
+              if (items.length <= 1) { Navigator.pop(context); return; }
+              setState(() { items = [...items]..removeWhere((a) => a.id == deleted.id); currentIndex = currentIndex.clamp(0, items.length - 1); });
+              pageController.jumpToPage(currentIndex);
+            }
+          }, icon: const Icon(Icons.delete_outline_rounded, color: Colors.white)),
+        ]),
+      )),
+      if (controls) Positioned(bottom: 0, left: 0, right: 0, child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 26, 18, 30),
+        decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent])),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _ViewerAction(icon: Icons.share_outlined, label: 'Share', onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Share action will be added in a later update.')))),
+          _ViewerAction(icon: Icons.info_outline_rounded, label: 'Details', onTap: () => showModalBottomSheet(context: context, backgroundColor: Theme.of(context).colorScheme.surface, builder: (_) => SafeArea(child: Padding(
+            padding: const EdgeInsets.all(22), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('File details', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12), Text(current.title ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6), Text('${current.width} × ${current.height}  •  ${_dateLabel(current.createDateTime)}'),
+            ]),
+          )))),
+        ]),
+      )),
+      if (items.length > 1) Positioned(bottom: 9, left: 0, right: 0, child: IgnorePointer(child: Center(
+        child: Text('${currentIndex + 1} / ${items.length}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+      ))),
+    ]),
+  );
+}
+
+class _ViewerAction extends StatelessWidget {
+  const _ViewerAction({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => TextButton.icon(onPressed: onTap,
+    icon: Icon(icon, color: Colors.white), label: Text(label, style: const TextStyle(color: Colors.white)));
+}
+
+class _ViewerMedia extends StatelessWidget {
+  const _ViewerMedia({required this.asset, required this.onTap});
+  final AssetEntity asset;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => FutureBuilder<File?>(
+    future: asset.file,
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.white));
+      final file = snapshot.data;
+      if (file == null) return const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48));
+      if (asset.type == AssetType.video) return _VideoPlayerView(file: file);
+      return GestureDetector(
+        onTap: onTap,
+        child: Center(child: InteractiveViewer(
+          minScale: 1, maxScale: 5, panEnabled: true, scaleEnabled: true,
+          boundaryMargin: const EdgeInsets.all(40),
+          child: Image.file(file, fit: BoxFit.contain, width: double.infinity, height: double.infinity),
         )),
-        if (controls) Positioned(top: 0, left: 0, right: 0, child: Container(
-          padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top, left: 8, right: 8, bottom: 12),
-          decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent])),
-          child: Row(children: [
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(current.title ?? 'Untitled', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-              Text(_dateLabel(current.createDateTime), style: const TextStyle(color: Colors.white70, fontSize: 11)),
-            ])),
-            IconButton(onPressed: () => widget.onFavorite(current), icon: Icon(widget.isFavorite(current) ? Icons.favorite : Icons.favorite_border, color: Colors.white)),
-            IconButton(onPressed: () async {
-              final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-                title: const Text('Delete this item?'), content: const Text('This removes the item from your device.'),
-                actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                  FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
-              if (ok == true && context.mounted) {
-                await widget.onDelete(current);
-                if (!context.mounted) return;
-                Navigator.pop(context);
-              }
-            }, icon: const Icon(Icons.delete_outline, color: Colors.white)),
-          ]),
-        )),
-        if (controls) Positioned(bottom: 0, left: 0, right: 0, child: Container(
-          padding: const EdgeInsets.fromLTRB(18, 24, 18, 28),
-          decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent])),
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            IconButton(onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Use your device share menu to share this item.'))),
-              icon: const Icon(Icons.share_outlined, color: Colors.white)),
-            IconButton(onPressed: () => showModalBottomSheet(context: context, builder: (_) => SafeArea(child: ListTile(
-              leading: const Icon(Icons.info_outline), title: const Text('File information'),
-              subtitle: Text('${current.title}\n${current.width} × ${current.height}\n${_dateLabel(current.createDateTime)}')))),
-              icon: const Icon(Icons.info_outline, color: Colors.white)),
-          ]),
-        )),
-      ]),
-    ),
+      );
+    },
   );
 }
 
 String _dateLabel(DateTime date) => '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 
-class _VideoPreview extends StatefulWidget {
-  const _VideoPreview({required this.file});
+class _VideoPlayerView extends StatefulWidget {
+  const _VideoPlayerView({required this.file});
   final File file;
   @override
-  State<_VideoPreview> createState() => _VideoPreviewState();
+  State<_VideoPlayerView> createState() => _VideoPlayerViewState();
 }
 
-class _VideoPreviewState extends State<_VideoPreview> {
-  // Video playback is provided by the platform's native gallery intent in this first UI build.
+class _VideoPlayerViewState extends State<_VideoPlayerView> {
+  late final VideoPlayerController controller;
+  bool ready = false;
   @override
-  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-    const Icon(Icons.videocam_outlined, color: Colors.white, size: 58),
-    const SizedBox(height: 12),
-    const Text('Video selected', style: TextStyle(color: Colors.white, fontSize: 16)),
-    const SizedBox(height: 8),
-    Text(widget.file.path.split(Platform.pathSeparator).last,
-      style: const TextStyle(color: Colors.white60, fontSize: 11), textAlign: TextAlign.center),
-  ]);
+  void initState() {
+    super.initState();
+    controller = VideoPlayerController.file(widget.file)
+      ..initialize().then((_) { if (mounted) setState(() => ready = true); });
+  }
+  @override
+  void dispose() { controller.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    if (!ready) return const Center(child: CircularProgressIndicator(color: Colors.white));
+    return Center(child: AspectRatio(
+      aspectRatio: controller.value.aspectRatio,
+      child: Stack(alignment: Alignment.center, children: [
+        VideoPlayer(controller),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => controller.value.isPlaying ? controller.pause() : controller.play()),
+          child: Center(child: AnimatedOpacity(
+            opacity: controller.value.isPlaying ? 0 : 1,
+            duration: const Duration(milliseconds: 180),
+            child: Container(padding: const EdgeInsets.all(14),
+              decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+              child: Icon(controller.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 42)),
+          )),
+        ),
+        Positioned(left: 12, right: 12, bottom: 8, child: VideoProgressIndicator(controller, allowScrubbing: true,
+          colors: const VideoProgressColors(playedColor: accent, bufferedColor: Colors.white38, backgroundColor: Colors.white24))),
+      ]),
+    ));
+  }
 }
